@@ -1,0 +1,94 @@
+name: Deploy Video Processing Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd src/functions/initialize && npm ci
+          cd ../../functions/download-video && npm ci
+          cd ../../functions/extract-audio && npm ci
+          cd ../../functions/transcribe-chunks && npm ci
+          cd ../../functions/notify && npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    name: Deploy
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Python (for SAM CLI)
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install SAM CLI
+        run: |
+          pip install aws-sam-cli
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: sa-east-1
+
+      - name: SAM Build
+        run: sam build
+
+      - name: Deploy to dev environment
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          sam deploy \
+            --stack-name lancemonos-video-processor-dev \
+            --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
+            --no-fail-on-empty-changeset \
+            --capabilities CAPABILITY_IAM
+
+      - name: Deploy to production
+        if: github.ref == 'refs/heads/main'
+        run: |
+          sam deploy \
+            --stack-name lancemonos-video-processor \
+            --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
+            --no-fail-on-empty-changeset \
+            --capabilities CAPABILITY_IAM

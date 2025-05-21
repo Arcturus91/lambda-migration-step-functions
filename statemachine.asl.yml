@@ -1,0 +1,98 @@
+Comment: Video Processing Workflow
+StartAt: Initialize
+States:
+  Initialize:
+    Type: Task
+    Resource: ${InitializeFunctionArn}
+    Next: DownloadVideo
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        ResultPath: "$.error"
+        Next: HandleError
+
+  DownloadVideo:
+    Type: Task
+    Resource: ${DownloadVideoFunctionArn}
+    Next: ExtractAudio
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        ResultPath: "$.error"
+        Next: HandleError
+
+  ExtractAudio:
+    Type: Task
+    Resource: ${ExtractAudioFunctionArn}
+    Next: TranscribeChunks
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        ResultPath: "$.error"
+        Next: HandleError
+
+  TranscribeChunks:
+    Type: Task
+    Resource: ${TranscribeChunksFunctionArn}
+    Next: NotifySuccess
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 5
+        MaxAttempts: 3
+        BackoffRate: 2
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        ResultPath: "$.error"
+        Next: HandleError
+
+  NotifySuccess:
+    Type: Task
+    Resource: ${NotifyFunctionArn}
+    Parameters:
+      isError: false
+      executionId.$: "$$.Execution.Id"
+      fileKey.$: "$.fileKey"
+      transcription.$: "$.transcription"
+    End: true
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
+
+  HandleError:
+    Type: Task
+    Resource: ${NotifyFunctionArn}
+    Parameters:
+      isError: true
+      executionId.$: "$$.Execution.Id"
+      fileKey.$: "$.fileKey"
+      error.$: "$.error"
+    End: true
+    Retry:
+      - ErrorEquals:
+          - States.ALL
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2

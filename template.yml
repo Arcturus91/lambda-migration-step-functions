@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lancemonos Video Processing Pipeline with Step Functions
+
+Parameters:
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API Key
+
+Resources:
+  # Common IAM Role for all Lambda functions
+  LancemonosLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:HeadObject
+                Resource:
+                  - !Sub "arn:aws:s3:::lancemonos-nomas/*"
+                  - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts/*"
+        - PolicyName: SNSPublishPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource:
+                  - "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
+                  - "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
+
+  # Lambda Functions
+  InitializeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/initialize/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Timeout: 30
+      MemorySize: 128
+      Role: !GetAtt LancemonosLambdaRole.Arn
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+
+  DownloadVideoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/download-video/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Timeout: 300
+      MemorySize: 512
+      Role: !GetAtt LancemonosLambdaRole.Arn
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+
+  ExtractAudioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/extract-audio/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Timeout: 300
+      MemorySize: 1024
+      Role: !GetAtt LancemonosLambdaRole.Arn
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+      Layers:
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
+
+  TranscribeChunksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/transcribe-chunks/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Timeout: 900
+      MemorySize: 2048
+      Role: !GetAtt LancemonosLambdaRole.Arn
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+
+  NotifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/notify/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Timeout: 60
+      MemorySize: 128
+      Role: !GetAtt LancemonosLambdaRole.Arn
+      Environment:
+        Variables:
+          TOPIC_SNS_NOTIFICATION: "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
+          TOPIC_SNS_ERROR: "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+
+  # Step Functions Role
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt InitializeFunction.Arn
+                  - !GetAtt DownloadVideoFunction.Arn
+                  - !GetAtt ExtractAudioFunction.Arn
+                  - !GetAtt TranscribeChunksFunction.Arn
+                  - !GetAtt NotifyFunction.Arn
+
+  # Step Functions State Machine
+  VideoProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine.asl.yml
+      Role: !GetAtt StepFunctionsExecutionRole.Arn
+      Type: STANDARD
+      DefinitionSubstitutions:
+        InitializeFunctionArn: !GetAtt InitializeFunction.Arn
+        DownloadVideoFunctionArn: !GetAtt DownloadVideoFunction.Arn
+        ExtractAudioFunctionArn: !GetAtt ExtractAudioFunction.Arn
+        TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
+        NotifyFunctionArn: !GetAtt NotifyFunction.Arn
+
+  # SQS Queue for S3 events
+  VideoProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  VideoProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  # S3 Event notification
+  S3EventsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt InitializeFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref "AWS::AccountId"
+      SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-videos"
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the Step Functions State Machine
+    Value: !Ref VideoProcessingStateMachine
+
+  VideoProcessingQueueUrl:
+    Description: URL of the SQS Queue for video processing
+    Value: !Ref VideoProcessingQueue
+
+  VideoProcessingDLQUrl:
+    Description: URL of the Dead Letter Queue
+    Value: !Ref VideoProcessingDLQ

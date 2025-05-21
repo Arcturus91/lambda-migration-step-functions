@@ -1,0 +1,14 @@
+{
+    "name": "extract-audio-function",
+    "version": "1.0.0",
+    "description": "Extract audio from video using FFmpeg",
+    "main": "index.js",
+    "type": "module",
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.400.0",
+        "fluent-ffmpeg": "^2.1.2"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}
