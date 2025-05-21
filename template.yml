@@ -49,10 +49,10 @@ Resources:
   InitializeFunction:
     Type: AWS::Serverless::Function
     Metadata:
-    BuildMethod: nodejs20.x
-    BuildProperties:
-      IncludePaths:
-        - src/lib/**
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        IncludePaths:
+          - src/lib/**
     Properties:
       CodeUri: src/functions/initialize/
       Handler: index.handler
