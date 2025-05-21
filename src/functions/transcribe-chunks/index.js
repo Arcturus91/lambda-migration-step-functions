@@ -2,7 +2,7 @@ import { OpenAI } from "openai";
 import { promises as fs } from "fs";
 import { createReadStream } from "fs";
 import { File } from "buffer";
-import { uploadDataToS3 } from "../../lib/s3-utils.js";
+import { uploadDataToS3 } from "./lib/s3-utils.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

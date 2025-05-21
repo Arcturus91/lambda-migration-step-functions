@@ -1,4 +1,4 @@
-import { getObjectMetadata } from "../../lib/s3-utils.js";
+import { getObjectMetadata } from "./lib/s3-utils.js";
 
 export const handler = async (event) => {
   console.log(

@@ -1,4 +1,4 @@
-import { notifyUser } from "../../lib/notification-utils.js";
+import { notifyUser } from "./lib/notification-utils.js";
 
 export const handler = async (event) => {
   console.log(

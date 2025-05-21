@@ -2,11 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Lancemonos Video Processing Pipeline with Step Functions
 
-Parameters:
-  OpenAIApiKey:
-    Type: String
-    NoEcho: true
-    Description: OpenAI API Key
+# Removed OpenAIApiKey parameter since we're using SSM
 
 Resources:
   # Common IAM Role for all Lambda functions
@@ -44,6 +40,28 @@ Resources:
                 Resource:
                   - "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
                   - "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
+        # Added SSM Parameter Policy
+        - PolicyName: SSMParameterPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - "arn:aws:ssm:sa-east-1:905418161107:parameter/lancemonos/openai/api-key"
+        # Added SQS policy for event source mapping
+        - PolicyName: SQSAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt VideoProcessingQueue.Arn
 
   # Lambda Functions
   InitializeFunction:
@@ -64,10 +82,15 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Environment:
         Variables:
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
 
   DownloadVideoFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        IncludePaths:
+          - src/lib/**
     Properties:
       CodeUri: src/functions/download-video/
       Handler: index.handler
@@ -79,10 +102,15 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Environment:
         Variables:
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
 
   ExtractAudioFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        IncludePaths:
+          - src/lib/**
     Properties:
       CodeUri: src/functions/extract-audio/
       Handler: index.handler
@@ -94,12 +122,17 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Environment:
         Variables:
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
       Layers:
         - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
 
   TranscribeChunksFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        IncludePaths:
+          - src/lib/**
     Properties:
       CodeUri: src/functions/transcribe-chunks/
       Handler: index.handler
@@ -111,10 +144,15 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Environment:
         Variables:
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
 
   NotifyFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        IncludePaths:
+          - src/lib/**
     Properties:
       CodeUri: src/functions/notify/
       Handler: index.handler
@@ -128,7 +166,7 @@ Resources:
         Variables:
           TOPIC_SNS_NOTIFICATION: "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
           TOPIC_SNS_ERROR: "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
 
   # Step Functions Role
   StepFunctionsExecutionRole:
@@ -184,14 +222,40 @@ Resources:
       MessageRetentionPeriod: 1209600 # 14 days
 
   # S3 Event notification
-  S3EventsLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt InitializeFunction.Arn
-      Principal: s3.amazonaws.com
-      SourceAccount: !Ref "AWS::AccountId"
-      SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-test"
+  # S3EventsLambdaPermission:
+  #   Type: AWS::Lambda::Permission
+  #   Properties:
+  #     Action: lambda:InvokeFunction
+  #     FunctionName: !GetAtt InitializeFunction.Arn
+  #     Principal: s3.amazonaws.com
+  #     SourceAccount: !Ref "AWS::AccountId"
+  #     SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-test"
+
+  # SQS policy to allow S3 to send messages
+  # SQSPolicy:
+  #   Type: AWS::SQS::QueuePolicy
+  #   Properties:
+  #     Queues:
+  #       - !Ref VideoProcessingQueue
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: s3.amazonaws.com
+  #           Action: sqs:SendMessage
+  #           Resource: !GetAtt VideoProcessingQueue.Arn
+  #           Condition:
+  #             ArnLike:
+  #               aws:SourceArn: arn:aws:s3:::lancemonos-nomas-test
+
+  # Lambda event source mapping
+  # LambdaSQSMapping:
+  #   Type: AWS::Lambda::EventSourceMapping
+  #   Properties:
+  #     EventSourceArn: !GetAtt VideoProcessingQueue.Arn
+  #     FunctionName: !Ref InitializeFunction
+  #     BatchSize: 1
 
 Outputs:
   StateMachineArn:

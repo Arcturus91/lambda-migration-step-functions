@@ -1,4 +1,4 @@
-import { downloadFileFromS3 } from "../../lib/s3-utils.js";
+import { downloadFileFromS3 } from "./lib/s3-utils.js";
 
 export const handler = async (event) => {
   console.log(
