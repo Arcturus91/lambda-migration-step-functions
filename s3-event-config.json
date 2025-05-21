@@ -1,0 +1,18 @@
+{
+  "QueueConfigurations": [
+    {
+      "QueueArn": "arn:aws:sqs:sa-east-1:905418161107:lancemonos-video-processor-VideoProcessingQueue-KIt1DwZJnQI6",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "suffix",
+              "Value": ".mp4"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

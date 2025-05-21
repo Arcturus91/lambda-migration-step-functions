@@ -33,7 +33,7 @@ Resources:
                   - s3:PutObject
                   - s3:HeadObject
                 Resource:
-                  - !Sub "arn:aws:s3:::lancemonos-nomas/*"
+                  - !Sub "arn:aws:s3:::lancemonos-nomas-test/*"
                   - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts/*"
         - PolicyName: SNSPublishPolicy
           PolicyDocument:
@@ -48,6 +48,11 @@ Resources:
   # Lambda Functions
   InitializeFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+    BuildMethod: nodejs20.x
+    BuildProperties:
+      IncludePaths:
+        - src/lib/**
     Properties:
       CodeUri: src/functions/initialize/
       Handler: index.handler
@@ -186,7 +191,7 @@ Resources:
       FunctionName: !GetAtt InitializeFunction.Arn
       Principal: s3.amazonaws.com
       SourceAccount: !Ref "AWS::AccountId"
-      SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-videos"
+      SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-test"
 
 Outputs:
   StateMachineArn:
