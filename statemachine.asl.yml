@@ -15,6 +15,8 @@ States:
         audioPath.$: "$.audioPath"
         audioBucket: "${AudioBucket}"
         metadata.$: "$.metadata"
+        outputBucket.$: "$.outputBucket"
+        fileExtension.$: "$.fileExtension"
     Next: TranscribeChunks
     Retry:
       - ErrorEquals:
