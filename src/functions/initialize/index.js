@@ -47,8 +47,11 @@ export const handler = async (event) => {
       );
 
       // Start the Step Function execution
-      const executionName = `video-processing-${fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
-      
+      const executionName = `video-processing-${fileKey
+        .split("/")
+        .pop()
+        .replace(/\./g, "-")}-${Date.now()}`;
+
       const startExecutionCommand = new StartExecutionCommand({
         stateMachineArn: stateMachineArn,
         name: executionName,
@@ -56,9 +59,9 @@ export const handler = async (event) => {
       });
 
       const response = await sfnClient.send(startExecutionCommand);
-      
+
       console.log("Started Step Function execution:", response);
-      
+
       return {
         statusCode: 200,
         executionArn: response.executionArn,
@@ -70,8 +73,11 @@ export const handler = async (event) => {
     // Direct invocation (for testing or direct calls)
     else if (event.fileKey) {
       // Already has context, start the execution
-      const executionName = `video-processing-${event.fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
-      
+      const executionName = `video-processing-${event.fileKey
+        .split("/")
+        .pop()
+        .replace(/\./g, "-")}-${Date.now()}`;
+
       const startExecutionCommand = new StartExecutionCommand({
         stateMachineArn: stateMachineArn,
         name: executionName,
@@ -79,9 +85,9 @@ export const handler = async (event) => {
       });
 
       const response = await sfnClient.send(startExecutionCommand);
-      
+
       console.log("Started Step Function execution:", response);
-      
+
       return {
         statusCode: 200,
         executionArn: response.executionArn,
@@ -119,8 +125,11 @@ export const handler = async (event) => {
       );
 
       // Start the Step Function execution
-      const executionName = `video-processing-${fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
-      
+      const executionName = `video-processing-${fileKey
+        .split("/")
+        .pop()
+        .replace(/\./g, "-")}-${Date.now()}`;
+
       const startExecutionCommand = new StartExecutionCommand({
         stateMachineArn: stateMachineArn,
         name: executionName,
@@ -128,9 +137,9 @@ export const handler = async (event) => {
       });
 
       const response = await sfnClient.send(startExecutionCommand);
-      
+
       console.log("Started Step Function execution:", response);
-      
+
       return {
         statusCode: 200,
         executionArn: response.executionArn,

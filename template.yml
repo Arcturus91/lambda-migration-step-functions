@@ -8,7 +8,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       MessageRetentionPeriod: 1209600 # 14 days
-      
+
   VideoProcessingQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -17,34 +17,53 @@ Resources:
         deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
         maxReceiveCount: 3
 
-  # S3 Buckets
+  # SQS policy to allow S3 to send messages - MOVED BEFORE S3 BUCKET
+  SQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref VideoProcessingQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt VideoProcessingQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:s3:::ln-init-processor-video"
+
+  # S3 Buckets - Fixed: Added dependency on SQS policy
   VideoProcessingBucket:
     Type: AWS::S3::Bucket
+    DependsOn: SQSPolicy
     Properties:
-      BucketName: ln-init-processor-video
+      BucketName: !Sub "ln-init-processor-video"
       NotificationConfiguration:
         QueueConfigurations:
           - Event: s3:ObjectCreated:*
             Queue: !GetAtt VideoProcessingQueue.Arn
       CorsConfiguration:
         CorsRules:
-          - AllowedHeaders: ['*']
+          - AllowedHeaders: ["*"]
             AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
-            AllowedOrigins: ['*']
+            AllowedOrigins: ["*"]
             MaxAge: 3000
 
   AudioStorageBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: ln-audio-register
+      BucketName: !Sub "ln-audio-register"
       CorsConfiguration:
         CorsRules:
-          - AllowedHeaders: ['*']
+          - AllowedHeaders: ["*"]
             AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
-            AllowedOrigins: ['*']
+            AllowedOrigins: ["*"]
             MaxAge: 3000
 
-  # Common IAM Role for all Lambda functions
+  # Common IAM Role for all Lambda functions - FIXED: Proper ARN format
   LancemonosLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -68,9 +87,19 @@ Resources:
                   - s3:PutObject
                   - s3:HeadObject
                 Resource:
-                  - !Sub "arn:aws:s3:::${VideoProcessingBucket}/*"
-                  - !Sub "arn:aws:s3:::${AudioStorageBucket}/*"
+                  # FIXED: Use proper S3 ARN format with hardcoded bucket names to avoid circular dependency
+                  - !Sub "arn:aws:s3:::ln-init-processor-video/*"
+                  - !Sub "arn:aws:s3:::ln-audio-register/*"
                   - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts/*"
+              # Add bucket-level permissions
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:aws:s3:::ln-init-processor-video"
+                  - !Sub "arn:aws:s3:::ln-audio-register"
+                  - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts"
         - PolicyName: SNSPublishPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -80,7 +109,6 @@ Resources:
                 Resource:
                   - "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
                   - "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
-        # Added SSM Parameter Policy
         - PolicyName: SSMParameterPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -88,9 +116,17 @@ Resources:
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
+                  - ssm:GetParameters
                 Resource:
                   - "arn:aws:ssm:sa-east-1:905418161107:parameter/lancemonos/openai/api-key"
-        # Added SQS policy for event source mapping
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource:
+                  - "arn:aws:kms:sa-east-1:905418161107:key/*"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": "ssm.sa-east-1.amazonaws.com"
         - PolicyName: SQSAccessPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -102,7 +138,6 @@ Resources:
                   - sqs:GetQueueAttributes
                   - sqs:ChangeMessageVisibility
                 Resource: !GetAtt VideoProcessingQueue.Arn
-        # Added Step Functions policy to start executions
         - PolicyName: StepFunctionsPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -110,7 +145,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:StartExecution
-                Resource: "*"
+                Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
 
   # Shared Lambda Layer
   SharedUtilsLayer:
@@ -122,6 +157,40 @@ Resources:
       CompatibleRuntimes:
         - nodejs20.x
       RetentionPolicy: Retain
+
+  # Step Functions Role
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+
+  # Step Functions State Machine
+  VideoProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine.asl.yml
+      Role: !GetAtt StepFunctionsExecutionRole.Arn
+      Type: STANDARD
+      DefinitionSubstitutions:
+        DownloadExtractFunctionArn: !GetAtt DownloadExtractFunction.Arn
+        TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
+        NotifyFunctionArn: !GetAtt NotifyFunction.Arn
+        AudioBucket: !Ref AudioStorageBucket
 
   # Lambda Functions
   InitializeFunction:
@@ -142,7 +211,7 @@ Resources:
         - "arn:aws:lambda:sa-east-1:905418161107:layer:nodejs-deps:2"
       Environment:
         Variables:
-          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
+          OPENAI_API_KEY: "dummy-key"
           STATE_MACHINE_ARN: !Ref VideoProcessingStateMachine
       Events:
         SQSEvent:
@@ -170,7 +239,7 @@ Resources:
         - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
       Environment:
         Variables:
-          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
+          OPENAI_API_KEY: "dummy-key"
           AUDIO_BUCKET: !Ref AudioStorageBucket
 
   TranscribeChunksFunction:
@@ -192,7 +261,7 @@ Resources:
         - "arn:aws:lambda:sa-east-1:905418161107:layer:openai-lambda-layer:1"
       Environment:
         Variables:
-          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
+          OPENAI_API_KEY: "dummy-key"
           AUDIO_BUCKET: !Ref AudioStorageBucket
 
   NotifyFunction:
@@ -215,61 +284,7 @@ Resources:
         Variables:
           TOPIC_SNS_NOTIFICATION: "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
           TOPIC_SNS_ERROR: "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
-          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
-
-  # Step Functions State Machine - Define before referencing in InitializeFunction
-  VideoProcessingStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      DefinitionUri: statemachine.asl.yml
-      Role: !GetAtt StepFunctionsExecutionRole.Arn
-      Type: STANDARD
-      DefinitionSubstitutions:
-        DownloadExtractFunctionArn: !GetAtt DownloadExtractFunction.Arn
-        TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
-        NotifyFunctionArn: !GetAtt NotifyFunction.Arn
-        AudioBucket: !Ref AudioStorageBucket
-
-  # Step Functions Role
-  StepFunctionsExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: states.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: LambdaInvokePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource:
-                  - !GetAtt DownloadExtractFunction.Arn
-                  - !GetAtt TranscribeChunksFunction.Arn
-                  - !GetAtt NotifyFunction.Arn
-
-  # SQS policy to allow S3 to send messages
-  SQSPolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - !Ref VideoProcessingQueue
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sqs:SendMessage
-            Resource: !GetAtt VideoProcessingQueue.Arn
-            Condition:
-              ArnLike:
-                aws:SourceArn: !Sub "arn:aws:s3:::${VideoProcessingBucket}"
+          OPENAI_API_KEY: "dummy-key"
 
 Outputs:
   StateMachineArn:
@@ -283,11 +298,11 @@ Outputs:
   VideoProcessingDLQUrl:
     Description: URL of the Dead Letter Queue
     Value: !Ref VideoProcessingDLQ
-    
+
   VideoProcessingBucketName:
     Description: Name of the S3 bucket for video input
     Value: !Ref VideoProcessingBucket
-    
+
   AudioStorageBucketName:
     Description: Name of the S3 bucket for audio storage
     Value: !Ref AudioStorageBucket

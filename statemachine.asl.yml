@@ -1,18 +1,30 @@
 Comment: Video Processing Workflow
 StartAt: DownloadAndExtract
+QueryLanguage: JSONPath
 States:
   DownloadAndExtract:
     Type: Task
-    Resource: ${DownloadExtractFunctionArn}
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: "$.Payload"
     Parameters:
-      fileKey.$: "$.fileKey"
-      sourceBucket.$: "$.sourceBucket"
-      tempPath.$: "$.tempPath"
-      audioPath.$: "$.audioPath"
-      audioBucket: "${AudioBucket}"
-      metadata.$: "$.metadata"
+      FunctionName: ${DownloadExtractFunctionArn}
+      Payload:
+        fileKey.$: "$.fileKey"
+        sourceBucket.$: "$.sourceBucket"
+        tempPath.$: "$.tempPath"
+        audioPath.$: "$.audioPath"
+        audioBucket: "${AudioBucket}"
+        metadata.$: "$.metadata"
     Next: TranscribeChunks
     Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 3
+        MaxAttempts: 2
+        BackoffRate: 2
       - ErrorEquals:
           - States.ALL
         IntervalSeconds: 3
@@ -26,17 +38,28 @@ States:
 
   TranscribeChunks:
     Type: Task
-    Resource: ${TranscribeChunksFunctionArn}
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: "$.Payload"
     Parameters:
-      fileKey.$: "$.fileKey"
-      audioBucket: "${AudioBucket}"
-      audioKey.$: "$.audioKey"
-      outputBucket.$: "$.outputBucket"
-      metadata.$: "$.metadata"
-      chunkConfig.$: "$.chunkConfig"
-      fileExtension.$: "$.fileExtension"
+      FunctionName: ${TranscribeChunksFunctionArn}
+      Payload:
+        fileKey.$: "$.fileKey"
+        audioBucket: "${AudioBucket}"
+        audioKey.$: "$.audioKey"
+        outputBucket.$: "$.outputBucket"
+        metadata.$: "$.metadata"
+        chunkConfig.$: "$.chunkConfig"
+        fileExtension.$: "$.fileExtension"
     Next: NotifySuccess
     Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 5
+        MaxAttempts: 3
+        BackoffRate: 2
       - ErrorEquals:
           - States.ALL
         IntervalSeconds: 5
@@ -50,14 +73,24 @@ States:
 
   NotifySuccess:
     Type: Task
-    Resource: ${NotifyFunctionArn}
+    Resource: arn:aws:states:::lambda:invoke
     Parameters:
-      isError: false
-      executionId.$: "$$.Execution.Id"
-      fileKey.$: "$.fileKey"
-      transcription.$: "$.transcription"
+      FunctionName: ${NotifyFunctionArn}
+      Payload:
+        isError: false
+        executionId.$: "$$.Execution.Id"
+        fileKey.$: "$.fileKey"
+        transcription.$: "$.transcription"
     End: true
     Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
       - ErrorEquals:
           - States.ALL
         IntervalSeconds: 2
@@ -66,14 +99,24 @@ States:
 
   HandleError:
     Type: Task
-    Resource: ${NotifyFunctionArn}
+    Resource: arn:aws:states:::lambda:invoke
     Parameters:
-      isError: true
-      executionId.$: "$$.Execution.Id"
-      fileKey.$: "$.fileKey"
-      error.$: "$.error"
+      FunctionName: ${NotifyFunctionArn}
+      Payload:
+        isError: true
+        executionId.$: "$$.Execution.Id"
+        fileKey.$: "$.fileKey"
+        error.$: "$.error"
     End: true
     Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 2
+        MaxAttempts: 2
+        BackoffRate: 2
       - ErrorEquals:
           - States.ALL
         IntervalSeconds: 2

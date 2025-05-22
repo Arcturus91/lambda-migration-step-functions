@@ -28,17 +28,27 @@ export const handler = async (event) => {
       fileExtension,
     } = event;
 
-    if (!audioBucket || !audioKey || !fileKey || !outputBucket || !chunkConfig) {
-      throw new Error("Missing required parameters: audioBucket, audioKey, fileKey, outputBucket, or chunkConfig");
+    if (
+      !audioBucket ||
+      !audioKey ||
+      !fileKey ||
+      !outputBucket ||
+      !chunkConfig
+    ) {
+      throw new Error(
+        "Missing required parameters: audioBucket, audioKey, fileKey, outputBucket, or chunkConfig"
+      );
     }
 
     // Define the local audio path
     const audioPath = `/tmp/${audioKey.split("/").pop()}`;
-    
+
     // Download the audio file from the audio bucket
-    console.log(`Downloading audio file from ${audioBucket}/${audioKey} to ${audioPath}`);
+    console.log(
+      `Downloading audio file from ${audioBucket}/${audioKey} to ${audioPath}`
+    );
     await downloadFileFromS3(audioBucket, audioKey, audioPath);
-    
+
     // Extract audio chunks and transcribe
     console.log("Starting chunked transcription process...");
     const fullTranscription = await transcribeAudioInChunks(
