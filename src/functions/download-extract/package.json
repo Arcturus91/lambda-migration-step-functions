@@ -4,10 +4,7 @@
     "description": "Download video and extract audio using FFmpeg",
     "main": "index.js",
     "type": "module",
-    "dependencies": {
-        "@aws-sdk/client-s3": "^3.400.0",
-        "fluent-ffmpeg": "^2.1.2"
-    },
+    "dependencies": {},
     "engines": {
         "node": ">=20.0.0"
     }

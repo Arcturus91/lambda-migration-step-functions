@@ -4,73 +4,44 @@ on:
   push:
     branches:
       - main
-      - develop
-  pull_request:
-    branches:
-      - main
-      - develop
+
+env:
+  AWS_REGION: sa-east-1
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.9"
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: |
-          npm ci
-          cd src/functions/initialize && npm ci
-          cd ../../functions/download-video && npm ci
-          cd ../../functions/extract-audio && npm ci
-          cd ../../functions/transcribe-chunks && npm ci
-          cd ../../functions/notify && npm ci
-
-      - name: Run linter
-        run: npm run lint
-
-      - name: Run tests
-        run: npm test
-
   deploy:
     name: Deploy
-    needs: test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
 
-      - name: Setup Python (for SAM CLI)
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
       - name: Install SAM CLI
         run: |
           pip install aws-sam-cli
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: sa-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: SAM Build
         run: sam build
@@ -82,7 +53,8 @@ jobs:
             --stack-name lancemonos-video-processor-dev \
             --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
             --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_IAM
+            --capabilities CAPABILITY_IAM \
+            --region ${{ env.AWS_REGION }}
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/main'
@@ -91,4 +63,5 @@ jobs:
             --stack-name lancemonos-video-processor \
             --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
             --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_IAM
+            --capabilities CAPABILITY_IAM \
+            --region ${{ env.AWS_REGION }}

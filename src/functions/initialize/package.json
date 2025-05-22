@@ -4,10 +4,7 @@
     "description": "Initialize video processing workflow",
     "main": "index.js",
     "type": "module",
-    "dependencies": {
-        "@aws-sdk/client-s3": "^3.400.0",
-        "@aws-sdk/client-sfn": "^3.400.0"
-    },
+    "dependencies": {},
     "engines": {
         "node": ">=20.0.0"
     }

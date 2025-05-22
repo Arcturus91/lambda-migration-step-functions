@@ -4,11 +4,7 @@
     "description": "Transcribe audio chunks using OpenAI API",
     "main": "index.js",
     "type": "module",
-    "dependencies": {
-        "@aws-sdk/client-s3": "^3.400.0",
-        "openai": "^4.0.0",
-        "buffer": "^6.0.3"
-    },
+    "dependencies": {},
     "engines": {
         "node": ">=20.0.0"
     }
