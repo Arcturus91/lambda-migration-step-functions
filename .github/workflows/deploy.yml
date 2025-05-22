@@ -64,3 +64,4 @@ jobs:
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_IAM \
             --region ${{ env.AWS_REGION }}
+            -s3-bucket aws-sam-cli-managed-default-samclisourcebucket-dvucrhprgees
