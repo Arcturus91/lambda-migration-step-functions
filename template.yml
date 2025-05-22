@@ -2,14 +2,26 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Lancemonos Video Processing Pipeline with Step Functions
 
-# Removed OpenAIApiKey parameter since we're using SSM
-
 Resources:
+  # SQS Queue and DLQ
+  VideoProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600 # 14 days
+      
+  VideoProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
+        maxReceiveCount: 3
+
   # S3 Buckets
   VideoProcessingBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: LN-init-processor-video
+      BucketName: ln-init-processor-video
       NotificationConfiguration:
         QueueConfigurations:
           - Event: s3:ObjectCreated:*
@@ -24,7 +36,7 @@ Resources:
   AudioStorageBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: LN-audio-register
+      BucketName: ln-audio-register
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
@@ -98,7 +110,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:StartExecution
-                Resource: !Ref VideoProcessingStateMachine
+                Resource: "*"
 
   # Shared Lambda Layer
   SharedUtilsLayer:
@@ -127,9 +139,10 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Layers:
         - !Ref SharedUtilsLayer
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:nodejs-deps:2"
       Environment:
         Variables:
-          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
           STATE_MACHINE_ARN: !Ref VideoProcessingStateMachine
       Events:
         SQSEvent:
@@ -153,10 +166,11 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Layers:
         - !Ref SharedUtilsLayer
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:nodejs-deps:2"
         - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
       Environment:
         Variables:
-          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
           AUDIO_BUCKET: !Ref AudioStorageBucket
 
   TranscribeChunksFunction:
@@ -174,9 +188,11 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Layers:
         - !Ref SharedUtilsLayer
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:nodejs-deps:2"
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:openai-lambda-layer:1"
       Environment:
         Variables:
-          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
           AUDIO_BUCKET: !Ref AudioStorageBucket
 
   NotifyFunction:
@@ -194,11 +210,25 @@ Resources:
       Role: !GetAtt LancemonosLambdaRole.Arn
       Layers:
         - !Ref SharedUtilsLayer
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:nodejs-deps:2"
       Environment:
         Variables:
           TOPIC_SNS_NOTIFICATION: "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
           TOPIC_SNS_ERROR: "arn:aws:sns:sa-east-1:905418161107:Errors-in-lambdas-Lancemonos"
-          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          OPENAI_API_KEY: !Sub "{{resolve:ssm:/lancemonos/openai/api-key}}"
+
+  # Step Functions State Machine - Define before referencing in InitializeFunction
+  VideoProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine.asl.yml
+      Role: !GetAtt StepFunctionsExecutionRole.Arn
+      Type: STANDARD
+      DefinitionSubstitutions:
+        DownloadExtractFunctionArn: !GetAtt DownloadExtractFunction.Arn
+        TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
+        NotifyFunctionArn: !GetAtt NotifyFunction.Arn
+        AudioBucket: !Ref AudioStorageBucket
 
   # Step Functions Role
   StepFunctionsExecutionRole:
@@ -223,43 +253,6 @@ Resources:
                   - !GetAtt TranscribeChunksFunction.Arn
                   - !GetAtt NotifyFunction.Arn
 
-  # Step Functions State Machine
-  VideoProcessingStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      DefinitionUri: statemachine.asl.yml
-      Role: !GetAtt StepFunctionsExecutionRole.Arn
-      Type: STANDARD
-      DefinitionSubstitutions:
-        DownloadExtractFunctionArn: !GetAtt DownloadExtractFunction.Arn
-        TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
-        NotifyFunctionArn: !GetAtt NotifyFunction.Arn
-        AudioBucket: !Ref AudioStorageBucket
-
-  # SQS Queue for S3 events
-  VideoProcessingQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      VisibilityTimeout: 900
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
-        maxReceiveCount: 3
-
-  VideoProcessingDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      MessageRetentionPeriod: 1209600 # 14 days
-
-  # S3 Event notification
-  # S3EventsLambdaPermission:
-  #   Type: AWS::Lambda::Permission
-  #   Properties:
-  #     Action: lambda:InvokeFunction
-  #     FunctionName: !GetAtt InitializeFunction.Arn
-  #     Principal: s3.amazonaws.com
-  #     SourceAccount: !Ref "AWS::AccountId"
-  #     SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-test"
-
   # SQS policy to allow S3 to send messages
   SQSPolicy:
     Type: AWS::SQS::QueuePolicy
@@ -277,15 +270,6 @@ Resources:
             Condition:
               ArnLike:
                 aws:SourceArn: !Sub "arn:aws:s3:::${VideoProcessingBucket}"
-
-  # Lambda event source mapping
-  LambdaSQSMapping:
-    Type: AWS::Lambda::EventSourceMapping
-    Properties:
-      EventSourceArn: !GetAtt VideoProcessingQueue.Arn
-      FunctionName: !Ref InitializeFunction
-      BatchSize: 1
-      Enabled: true
 
 Outputs:
   StateMachineArn:
