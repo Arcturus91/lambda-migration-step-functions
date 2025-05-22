@@ -1,7 +1,7 @@
 {
-    "name": "extract-audio-function",
+    "name": "download-extract-function",
     "version": "1.0.0",
-    "description": "Extract audio from video using FFmpeg",
+    "description": "Download video and extract audio using FFmpeg",
     "main": "index.js",
     "type": "module",
     "dependencies": {

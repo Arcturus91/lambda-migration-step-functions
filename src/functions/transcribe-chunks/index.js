@@ -2,7 +2,7 @@ import { OpenAI } from "openai";
 import { promises as fs } from "fs";
 import { createReadStream } from "fs";
 import { File } from "buffer";
-import { uploadDataToS3 } from "./lib/s3-utils.js";
+import { uploadDataToS3, downloadFileFromS3 } from "./lib/s3-utils.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -19,7 +19,8 @@ export const handler = async (event) => {
 
   try {
     const {
-      audioPath,
+      audioBucket,
+      audioKey,
       fileKey,
       outputBucket,
       metadata,
@@ -27,10 +28,17 @@ export const handler = async (event) => {
       fileExtension,
     } = event;
 
-    if (!audioPath || !fileKey || !outputBucket || !chunkConfig) {
-      throw new Error("Missing required parameters");
+    if (!audioBucket || !audioKey || !fileKey || !outputBucket || !chunkConfig) {
+      throw new Error("Missing required parameters: audioBucket, audioKey, fileKey, outputBucket, or chunkConfig");
     }
 
+    // Define the local audio path
+    const audioPath = `/tmp/${audioKey.split("/").pop()}`;
+    
+    // Download the audio file from the audio bucket
+    console.log(`Downloading audio file from ${audioBucket}/${audioKey} to ${audioPath}`);
+    await downloadFileFromS3(audioBucket, audioKey, audioPath);
+    
     // Extract audio chunks and transcribe
     console.log("Starting chunked transcription process...");
     const fullTranscription = await transcribeAudioInChunks(
@@ -46,19 +54,21 @@ export const handler = async (event) => {
       transcription: fullTranscription,
       metadata: {
         original_file: fileKey,
+        audio_file: audioKey,
         processed_at: new Date().toISOString(),
       },
     };
 
     // Build metadata for S3 upload
     const s3Metadata = {
-      contentid: metadata.contentId || "",
-      type: metadata.type || "",
-      title: metadata.title || "",
-      parentid: metadata.parentId || "",
-      orderindex: (metadata.orderIndex || 0).toString(),
+      contentid: metadata?.contentId || "",
+      type: metadata?.type || "",
+      title: metadata?.title || "",
+      parentid: metadata?.parentId || "",
+      orderindex: (metadata?.orderIndex || 0).toString(),
       fileextension: fileExtension,
       originalobjectkey: fileKey,
+      audiokey: audioKey,
     };
 
     // Upload transcription to S3

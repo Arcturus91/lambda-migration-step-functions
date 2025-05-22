@@ -5,6 +5,33 @@ Description: Lancemonos Video Processing Pipeline with Step Functions
 # Removed OpenAIApiKey parameter since we're using SSM
 
 Resources:
+  # S3 Buckets
+  VideoProcessingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: LN-init-processor-video
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt VideoProcessingQueue.Arn
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
+  AudioStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: LN-audio-register
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
   # Common IAM Role for all Lambda functions
   LancemonosLambdaRole:
     Type: AWS::IAM::Role
@@ -29,7 +56,8 @@ Resources:
                   - s3:PutObject
                   - s3:HeadObject
                 Resource:
-                  - !Sub "arn:aws:s3:::lancemonos-nomas-test/*"
+                  - !Sub "arn:aws:s3:::${VideoProcessingBucket}/*"
+                  - !Sub "arn:aws:s3:::${AudioStorageBucket}/*"
                   - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts/*"
         - PolicyName: SNSPublishPolicy
           PolicyDocument:
@@ -62,15 +90,32 @@ Resources:
                   - sqs:GetQueueAttributes
                   - sqs:ChangeMessageVisibility
                 Resource: !GetAtt VideoProcessingQueue.Arn
+        # Added Step Functions policy to start executions
+        - PolicyName: StepFunctionsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref VideoProcessingStateMachine
+
+  # Shared Lambda Layer
+  SharedUtilsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: lancemonos-shared-utils
+      Description: Shared utilities for Lancemonos Lambda functions
+      ContentUri: src/functions/shared-layer/
+      CompatibleRuntimes:
+        - nodejs20.x
+      RetentionPolicy: Retain
 
   # Lambda Functions
   InitializeFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: nodejs20.x
-      BuildProperties:
-        IncludePaths:
-          - src/lib/**
     Properties:
       CodeUri: src/functions/initialize/
       Handler: index.handler
@@ -80,59 +125,44 @@ Resources:
       Timeout: 30
       MemorySize: 128
       Role: !GetAtt LancemonosLambdaRole.Arn
+      Layers:
+        - !Ref SharedUtilsLayer
       Environment:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          STATE_MACHINE_ARN: !Ref VideoProcessingStateMachine
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt VideoProcessingQueue.Arn
+            BatchSize: 1
 
-  DownloadVideoFunction:
+  DownloadExtractFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: nodejs20.x
-      BuildProperties:
-        IncludePaths:
-          - src/lib/**
     Properties:
-      CodeUri: src/functions/download-video/
+      CodeUri: src/functions/download-extract/
       Handler: index.handler
       Runtime: nodejs20.x
       Architectures:
         - x86_64
-      Timeout: 300
-      MemorySize: 512
-      Role: !GetAtt LancemonosLambdaRole.Arn
-      Environment:
-        Variables:
-          OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
-
-  ExtractAudioFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: nodejs20.x
-      BuildProperties:
-        IncludePaths:
-          - src/lib/**
-    Properties:
-      CodeUri: src/functions/extract-audio/
-      Handler: index.handler
-      Runtime: nodejs20.x
-      Architectures:
-        - x86_64
-      Timeout: 300
+      Timeout: 600
       MemorySize: 1024
       Role: !GetAtt LancemonosLambdaRole.Arn
+      Layers:
+        - !Ref SharedUtilsLayer
+        - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
       Environment:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
-      Layers:
-        - "arn:aws:lambda:sa-east-1:905418161107:layer:ffmpeg:3"
+          AUDIO_BUCKET: !Ref AudioStorageBucket
 
   TranscribeChunksFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: nodejs20.x
-      BuildProperties:
-        IncludePaths:
-          - src/lib/**
     Properties:
       CodeUri: src/functions/transcribe-chunks/
       Handler: index.handler
@@ -142,17 +172,17 @@ Resources:
       Timeout: 900
       MemorySize: 2048
       Role: !GetAtt LancemonosLambdaRole.Arn
+      Layers:
+        - !Ref SharedUtilsLayer
       Environment:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm-secure:/lancemonos/openai/api-key:1}}"
+          AUDIO_BUCKET: !Ref AudioStorageBucket
 
   NotifyFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: nodejs20.x
-      BuildProperties:
-        IncludePaths:
-          - src/lib/**
     Properties:
       CodeUri: src/functions/notify/
       Handler: index.handler
@@ -162,6 +192,8 @@ Resources:
       Timeout: 60
       MemorySize: 128
       Role: !GetAtt LancemonosLambdaRole.Arn
+      Layers:
+        - !Ref SharedUtilsLayer
       Environment:
         Variables:
           TOPIC_SNS_NOTIFICATION: "arn:aws:sns:sa-east-1:905418161107:Notifications-in-lambdas-Lancemonos"
@@ -187,9 +219,7 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource:
-                  - !GetAtt InitializeFunction.Arn
-                  - !GetAtt DownloadVideoFunction.Arn
-                  - !GetAtt ExtractAudioFunction.Arn
+                  - !GetAtt DownloadExtractFunction.Arn
                   - !GetAtt TranscribeChunksFunction.Arn
                   - !GetAtt NotifyFunction.Arn
 
@@ -201,11 +231,10 @@ Resources:
       Role: !GetAtt StepFunctionsExecutionRole.Arn
       Type: STANDARD
       DefinitionSubstitutions:
-        InitializeFunctionArn: !GetAtt InitializeFunction.Arn
-        DownloadVideoFunctionArn: !GetAtt DownloadVideoFunction.Arn
-        ExtractAudioFunctionArn: !GetAtt ExtractAudioFunction.Arn
+        DownloadExtractFunctionArn: !GetAtt DownloadExtractFunction.Arn
         TranscribeChunksFunctionArn: !GetAtt TranscribeChunksFunction.Arn
         NotifyFunctionArn: !GetAtt NotifyFunction.Arn
+        AudioBucket: !Ref AudioStorageBucket
 
   # SQS Queue for S3 events
   VideoProcessingQueue:
@@ -232,30 +261,31 @@ Resources:
   #     SourceArn: !Sub "arn:aws:s3:::lancemonos-nomas-test"
 
   # SQS policy to allow S3 to send messages
-  # SQSPolicy:
-  #   Type: AWS::SQS::QueuePolicy
-  #   Properties:
-  #     Queues:
-  #       - !Ref VideoProcessingQueue
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Service: s3.amazonaws.com
-  #           Action: sqs:SendMessage
-  #           Resource: !GetAtt VideoProcessingQueue.Arn
-  #           Condition:
-  #             ArnLike:
-  #               aws:SourceArn: arn:aws:s3:::lancemonos-nomas-test
+  SQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref VideoProcessingQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt VideoProcessingQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:s3:::${VideoProcessingBucket}"
 
   # Lambda event source mapping
-  # LambdaSQSMapping:
-  #   Type: AWS::Lambda::EventSourceMapping
-  #   Properties:
-  #     EventSourceArn: !GetAtt VideoProcessingQueue.Arn
-  #     FunctionName: !Ref InitializeFunction
-  #     BatchSize: 1
+  LambdaSQSMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt VideoProcessingQueue.Arn
+      FunctionName: !Ref InitializeFunction
+      BatchSize: 1
+      Enabled: true
 
 Outputs:
   StateMachineArn:
@@ -269,3 +299,11 @@ Outputs:
   VideoProcessingDLQUrl:
     Description: URL of the Dead Letter Queue
     Value: !Ref VideoProcessingDLQ
+    
+  VideoProcessingBucketName:
+    Description: Name of the S3 bucket for video input
+    Value: !Ref VideoProcessingBucket
+    
+  AudioStorageBucketName:
+    Description: Name of the S3 bucket for audio storage
+    Value: !Ref AudioStorageBucket

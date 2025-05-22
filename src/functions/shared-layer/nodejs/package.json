@@ -1,0 +1,14 @@
+{
+  "name": "lancemonos-shared-utils",
+  "version": "1.0.0",
+  "description": "Shared utilities for Lancemonos Lambda functions",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.400.0",
+    "@aws-sdk/client-sns": "^3.400.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

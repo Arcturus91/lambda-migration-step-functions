@@ -1,5 +1,6 @@
 import ffmpeg from "fluent-ffmpeg";
 import { promises as fs } from "fs";
+import { downloadFileFromS3, uploadFileToS3 } from "./lib/s3-utils.js";
 
 // Set the ffmpeg path to the Lambda layer location
 const ffmpegPath = "/opt/bin/ffmpeg";
@@ -7,31 +8,51 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 export const handler = async (event) => {
   console.log(
-    "Extract Audio function received event:",
+    "Download & Extract function received event:",
     JSON.stringify(event, null, 2)
   );
 
   try {
-    const { tempPath, audioPath } = event;
+    // Extract required parameters
+    const { fileKey, sourceBucket, tempPath, audioPath, audioBucket } = event;
 
-    if (!tempPath || !audioPath) {
-      throw new Error("Missing required parameters: tempPath or audioPath");
+    // Validate required parameters
+    if (!fileKey || !sourceBucket || !tempPath || !audioPath || !audioBucket) {
+      throw new Error(
+        "Missing required parameters: fileKey, sourceBucket, tempPath, audioPath, or audioBucket"
+      );
     }
 
-    console.log(`Extracting audio from ${tempPath} to ${audioPath}`);
+    console.log(
+      `Processing video ${fileKey} from ${sourceBucket} to audio in ${audioBucket}`
+    );
 
-    // Extract audio from video
+    // Step 1: Download the video file from S3
+    console.log(`Downloading video ${fileKey} from ${sourceBucket} to ${tempPath}`);
+    await downloadFileFromS3(sourceBucket, fileKey, tempPath);
+    console.log(`Successfully downloaded video to ${tempPath}`);
+
+    // Step 2: Extract audio from video
+    console.log(`Extracting audio from ${tempPath} to ${audioPath}`);
     await extractAudio(tempPath, audioPath);
 
     // Get audio file size
     const audioStats = await fs.stat(audioPath);
     const audioSizeMB = audioStats.size / 1024 / 1024;
+    console.log(`Audio file size: ${audioSizeMB.toFixed(2)}MB from original video`);
 
-    console.log(
-      `Audio file size: ${audioSizeMB.toFixed(2)}MB from original video`
+    // Step 3: Upload the audio file to the target bucket
+    const audioKey = `${fileKey.split('.')[0]}.mp3`;
+    await uploadFileToS3(
+      audioBucket,
+      audioKey,
+      audioPath,
+      "audio/mp3",
+      { sourceVideo: fileKey }
     );
+    console.log(`Successfully uploaded audio to ${audioBucket}/${audioKey}`);
 
-    // Clean up the original video file to save space
+    // Step 4: Clean up the original video file to save space
     await fs.unlink(tempPath);
     console.log(`Deleted original video file: ${tempPath}`);
 
@@ -41,13 +62,16 @@ export const handler = async (event) => {
     // Return the updated context
     return {
       ...event,
+      videoDownloaded: true,
+      videoDownloadedAt: new Date().toISOString(),
       audioExtracted: true,
       audioExtractedAt: new Date().toISOString(),
       audioSizeMB,
+      audioKey,
       chunkConfig,
     };
   } catch (error) {
-    console.error("Error in extract-audio function:", error);
+    console.error("Error in download-extract function:", error);
     throw error;
   }
 };

@@ -1,4 +1,11 @@
 import { getObjectMetadata } from "./lib/s3-utils.js";
+import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
+
+// Initialize the Step Functions client
+const sfnClient = new SFNClient();
+
+// Get the state machine ARN from environment variable
+const stateMachineArn = process.env.STATE_MACHINE_ARN;
 
 export const handler = async (event) => {
   console.log(
@@ -39,12 +46,49 @@ export const handler = async (event) => {
         JSON.stringify(executionContext, null, 2)
       );
 
-      return executionContext;
+      // Start the Step Function execution
+      const executionName = `video-processing-${fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
+      
+      const startExecutionCommand = new StartExecutionCommand({
+        stateMachineArn: stateMachineArn,
+        name: executionName,
+        input: JSON.stringify(executionContext),
+      });
+
+      const response = await sfnClient.send(startExecutionCommand);
+      
+      console.log("Started Step Function execution:", response);
+      
+      return {
+        statusCode: 200,
+        executionArn: response.executionArn,
+        executionStartDate: response.startDate,
+        executionContext,
+        message: "Step Function execution started successfully",
+      };
     }
-    // Direct invocation from Step Functions
+    // Direct invocation (for testing or direct calls)
     else if (event.fileKey) {
-      // Already has context, just return it
-      return event;
+      // Already has context, start the execution
+      const executionName = `video-processing-${event.fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
+      
+      const startExecutionCommand = new StartExecutionCommand({
+        stateMachineArn: stateMachineArn,
+        name: executionName,
+        input: JSON.stringify(event),
+      });
+
+      const response = await sfnClient.send(startExecutionCommand);
+      
+      console.log("Started Step Function execution:", response);
+      
+      return {
+        statusCode: 200,
+        executionArn: response.executionArn,
+        executionStartDate: response.startDate,
+        executionContext: event,
+        message: "Step Function execution started successfully",
+      };
     }
     // Direct S3 event
     else if (event.Records && event.Records[0]?.eventSource === "aws:s3") {
@@ -74,7 +118,26 @@ export const handler = async (event) => {
         JSON.stringify(executionContext, null, 2)
       );
 
-      return executionContext;
+      // Start the Step Function execution
+      const executionName = `video-processing-${fileKey.split("/").pop().replace(/\./g, "-")}-${Date.now()}`;
+      
+      const startExecutionCommand = new StartExecutionCommand({
+        stateMachineArn: stateMachineArn,
+        name: executionName,
+        input: JSON.stringify(executionContext),
+      });
+
+      const response = await sfnClient.send(startExecutionCommand);
+      
+      console.log("Started Step Function execution:", response);
+      
+      return {
+        statusCode: 200,
+        executionArn: response.executionArn,
+        executionStartDate: response.startDate,
+        executionContext,
+        message: "Step Function execution started successfully",
+      };
     }
 
     // If we get here, it's an unsupported event type
