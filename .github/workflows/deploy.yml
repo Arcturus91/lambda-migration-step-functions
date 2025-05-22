@@ -30,7 +30,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
 
       - name: Install SAM CLI
         run: |
@@ -43,25 +42,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Install function dependencies
+        run: |
+          # Install production dependencies for each function
+          for func_dir in src/functions/*/; do
+            if [ -f "$func_dir/package.json" ]; then
+              echo "Installing dependencies for $(basename $func_dir)"
+              cd "$func_dir"
+              npm ci --only=production
+              cd - > /dev/null
+            fi
+          done
+
       - name: SAM Build
         run: sam build
 
-      - name: Deploy to dev environment
-        if: github.ref == 'refs/heads/develop'
-        run: |
-          sam deploy \
-            --stack-name lancemonos-video-processor-dev \
-            --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
-            --no-fail-on-empty-changeset \
-            --capabilities CAPABILITY_IAM \
-            --region ${{ env.AWS_REGION }}
-
       - name: Deploy to production
-        if: github.ref == 'refs/heads/main'
         run: |
           sam deploy \
             --stack-name lancemonos-video-processor \
-            --parameter-overrides OpenAIApiKey=${{ secrets.OPENAI_API_KEY }} \
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_IAM \
             --region ${{ env.AWS_REGION }}
