@@ -64,4 +64,5 @@ jobs:
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_IAM \
             --region ${{ env.AWS_REGION }}
-            --resolve-s3
+            --s3-bucket lancemonos-deployments \
+            --s3-prefix lancemonos-video-processor
