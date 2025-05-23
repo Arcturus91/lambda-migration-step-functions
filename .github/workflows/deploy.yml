@@ -1,4 +1,4 @@
-name: Deploy Video Processing Pipeline v1
+name: Deploy Video Processing Pipeline
 
 on:
   push:
@@ -9,6 +9,7 @@ env:
   AWS_REGION: sa-east-1
   NODE_VERSION: "20"
   PYTHON_VERSION: "3.9"
+  S3_BUCKET: lancemonos-deployments  # Add this
 
 jobs:
   deploy:
@@ -42,6 +43,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Create S3 bucket if it doesn't exist
+      - name: Create deployment S3 bucket
+        run: |
+          aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null || \
+          aws s3api create-bucket \
+            --bucket ${{ env.S3_BUCKET }} \
+            --region ${{ env.AWS_REGION }} \
+            --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+
       - name: Install function dependencies
         run: |
           # Install production dependencies for each function
@@ -63,6 +73,6 @@ jobs:
             --stack-name lancemonos-video-processor \
             --no-fail-on-empty-changeset \
             --capabilities CAPABILITY_IAM \
-            --region ${{ env.AWS_REGION }}
-            --s3-bucket lancemonos-deployments \
+            --region ${{ env.AWS_REGION }} \
+            --s3-bucket ${{ env.S3_BUCKET }} \
             --s3-prefix lancemonos-video-processor
