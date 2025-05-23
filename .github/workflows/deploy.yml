@@ -55,7 +55,7 @@ jobs:
           done
 
       - name: SAM Build
-        run: sam build
+        run: sam build --region ${{ env.AWS_REGION }}
 
       - name: Deploy to production
         run: |
