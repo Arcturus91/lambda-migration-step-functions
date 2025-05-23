@@ -1,4 +1,4 @@
-name: Deploy Video Processing Pipeline
+name: Deploy Video Processing Pipeline v1
 
 on:
   push:
