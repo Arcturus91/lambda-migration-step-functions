@@ -2,7 +2,7 @@ import ffmpeg from "fluent-ffmpeg";
 import { promises as fs } from "fs";
 import { downloadFileFromS3, uploadFileToS3 } from "./lib/s3-utils.js";
 
-// Set the ffmpeg path to the Lambda layer location
+// Set the ffmpeg path to the Lambda layer locations
 const ffmpegPath = "/opt/bin/ffmpeg";
 ffmpeg.setFfmpegPath(ffmpegPath);
 
