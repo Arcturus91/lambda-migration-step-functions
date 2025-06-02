@@ -91,6 +91,8 @@ Resources:
                   - !Sub "arn:aws:s3:::ln-init-processor-video/*"
                   - !Sub "arn:aws:s3:::ln-audio-register/*"
                   - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts/*"
+                  - !Sub "arn:aws:s3:::lancemonos-nomas/*"
+                  
               # Add bucket-level permissions
               - Effect: Allow
                 Action:
@@ -100,6 +102,7 @@ Resources:
                   - !Sub "arn:aws:s3:::ln-init-processor-video"
                   - !Sub "arn:aws:s3:::ln-audio-register"
                   - !Sub "arn:aws:s3:::lancemonos-nomas-transcripts"
+                  - !Sub "arn:aws:s3:::lancemonos-nomas"
         - PolicyName: SNSPublishPolicy
           PolicyDocument:
             Version: "2012-10-17"
